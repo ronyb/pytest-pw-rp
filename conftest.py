@@ -1,9 +1,10 @@
-import glob
+from datetime import datetime
 import logging
-from time import sleep
+import os
 
 import pytest
-
+from _pytest.fixtures import FixtureRequest
+from playwright.sync_api import BrowserContext
 from reportportal_client import RPLogger
 
 import rp_attachments
@@ -17,11 +18,28 @@ def rp_logger():
     return logger
 
 
-@pytest.fixture(autouse=True)
-def attach_pw_trace_to_rp(rp_logger: RPLogger):
+@pytest.fixture(scope="function", autouse=True)
+def strat_pw_trace_and_attach_to_rp_after_test(context: BrowserContext, request: FixtureRequest, rp_logger: RPLogger):
+    """
+    Starts Playwright tracing for each test, saves the trace file with a custom name
+    and attaches the trace file to ReportPortal report
+    """
+
+    test_name = request.node.name
+    timestamp = datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
+    trace_dir = "playwright-traces"
+    os.makedirs(trace_dir, exist_ok=True)
+    trace_file_path = os.path.join(trace_dir, f"{test_name}_{timestamp}.zip")
+
+    # Start Playwright tracing
+    context.tracing.start(screenshots=True, snapshots=True, sources=True)
+
     yield
-    trace_files = glob.glob("test-results/**/*.zip", recursive=True)
-    for trace_file in trace_files:
-        rp_attachments.attach_file(rp_logger=rp_logger,
-                                   log_message="Playwright Trace File",
-                                   file_to_attach_path=trace_file)
+
+    # Stop Playwright tracing and save it to file
+    context.tracing.stop(path=trace_file_path)
+
+    # Attach the trace file to ReportPortal
+    rp_attachments.attach_file(rp_logger=rp_logger,
+                               log_message="Playwright Trace File",
+                               file_to_attach_path=trace_file_path)
